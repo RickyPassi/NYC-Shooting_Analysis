@@ -1,0 +1,277 @@
+---
+title: "NYC Shooting"
+author: "R P"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, echo=TRUE}
+library(tidyverse)
+library(lubridate)
+```
+
+### Importing and Describing
+
+This is my attempt at importing and describing the shooting project dataset in a reproducible manner. 
+
+I am:
+
+- Assigning a name to the URL
+- Reading the data in
+- Showing the data that was read in
+- Providing a summary of that data
+
+```{r import_url, echo=TRUE}
+shooting_url<- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shooting_data<-read_csv(shooting_url)
+shooting_data
+summary(shooting_data)
+```
+
+### Factors
+
+Next, we need to assess which of my variable are factors, and for ones that are not, determine if they should be.
+
+```{r assess_factors, echo =TRUE}
+data.frame(
+variable = names(shooting_data),
+is_factor = sapply(shooting_data, is.factor),
+class = sapply(shooting_data, function(x) class(x)[1]))
+```
+
+As you can see, none of the variables are factors. However, some of them should be as long as they are categorical.
+
+### Relevant variables
+
+Before we do that, lets look at the entire dataset to see which variables are irrelevant to any sort of analysis.
+
+The below chunk will allow us to view the first several rows in RMD for all variables.
+
+```{r view_dataset, echo = TRUE}
+shooting_data %>% 
+  head() %>% 
+  print(width = Inf)
+```
+
+It looks like there are some variables we wont need. Let's remove the ones that offer precise geographical location data. We do not need those.  
+
+```{r remove_variables, echo = TRUE}
+shooting_data_reduced<- shooting_data %>%
+select(-c(X_COORD_CD:Lon_Lat))
+```
+
+There is a date variable, but the class is classified as a character. We need to change that to a date class. This is why we libraried in Lubridate earlier.
+
+```{r date_class, echo = TRUE}
+shooting_data_reduced$OCCUR_DATE<- mdy(shooting_data_reduced$OCCUR_DATE)
+shooting_data_reduced
+```
+
+We've removed unnecessary columns and ensured the OCCUR_DATE was accurately represented as a date class. Next we need to determine which variable should be treated as factors. None of the variables look like they would be needed for any computational analysis and all look like they are categorical, therefore each variable can be turned into a factor with the exception of Incident Key, Occur Date, and Occur Time.
+
+### Adding Variables
+
+One thing I noticed first before making these factors: There is currently no way of using Occur Time as a category. So if we create a new variable using three time periods of the day, the time can be a useful tool in understanding do more shootings occur during certain time periods. Let us create a new variable, separating the times into these four groups: 
+
+1. 00:00 - 05:59 = Early Morning
+2. 06:00 - 11:59 = Late Morning
+3. 12:00 - 17:59 = Afternoon
+4. 18:00 - 23:59 = Night
+
+We saw in the earlier assess_factors chunk that Occur_time is in the hms class, and time format. We do not have to do anything else to that column to prepare it. Let's create the new variable next to Occur_Time labeled Time_Block.
+
+```{r create_timeblock, echo = TRUE}
+shooting_data_reduced$TIME_BLOCK <- case_when(
+  hour(shooting_data_reduced$OCCUR_TIME) >= 0  & hour(shooting_data_reduced$OCCUR_TIME) < 6  ~ "Early Morning",
+  hour(shooting_data_reduced$OCCUR_TIME) >= 6  & hour(shooting_data_reduced$OCCUR_TIME) < 12 ~ "Late Morning",
+  hour(shooting_data_reduced$OCCUR_TIME) >= 12 & hour(shooting_data_reduced$OCCUR_TIME) < 18 ~ "Afternoon",
+  hour(shooting_data_reduced$OCCUR_TIME) >= 18 & hour(shooting_data_reduced$OCCUR_TIME) <= 23 ~ "Night")
+
+shooting_data_reduced <- shooting_data_reduced %>%
+  relocate(TIME_BLOCK, .after = OCCUR_TIME)
+
+shooting_data_reduced
+```
+
+Now that we have an a way to use time of day to categorize that data, lets move on to making the variables factors (except the three mentioned before).
+
+```{r make_factors, echo = TRUE}
+
+shooting_data_reduced$TIME_BLOCK <- as.factor(shooting_data_reduced$TIME_BLOCK)
+shooting_data_reduced$BORO <- as.factor(shooting_data_reduced$BORO)
+shooting_data_reduced$LOC_OF_OCCUR_DESC <- as.factor(shooting_data_reduced$LOC_OF_OCCUR_DESC)
+shooting_data_reduced$PRECINCT <- as.factor(shooting_data_reduced$PRECINCT)
+shooting_data_reduced$JURISDICTION_CODE <- as.factor(shooting_data_reduced$JURISDICTION_CODE)
+shooting_data_reduced$LOC_CLASSFCTN_DESC <- as.factor(shooting_data_reduced$LOC_CLASSFCTN_DESC)
+shooting_data_reduced$LOCATION_DESC <- as.factor(shooting_data_reduced$LOCATION_DESC)
+shooting_data_reduced$STATISTICAL_MURDER_FLAG <- as.factor(shooting_data_reduced$STATISTICAL_MURDER_FLAG)
+shooting_data_reduced$PERP_AGE_GROUP <- as.factor(shooting_data_reduced$PERP_AGE_GROUP)
+shooting_data_reduced$PERP_SEX <- as.factor(shooting_data_reduced$PERP_SEX)
+shooting_data_reduced$PERP_RACE <- as.factor(shooting_data_reduced$PERP_RACE)
+shooting_data_reduced$VIC_AGE_GROUP <- as.factor(shooting_data_reduced$VIC_AGE_GROUP)
+shooting_data_reduced$VIC_SEX <- as.factor(shooting_data_reduced$VIC_SEX)
+shooting_data_reduced$VIC_RACE <- as.factor(shooting_data_reduced$VIC_RACE)
+
+shooting_data_reduced
+```
+
+Success. We can see the variables have turned to fct.
+
+### NA's
+
+Next we need to account for any missing data. Lets find out which variables have NAs in their set, and how many. 
+
+```{r na_count, echo=TRUE}
+colSums(is.na(shooting_data_reduced))
+```
+
+Some of these variables will be very useful as they give complete/near complete data for all 28K+ rows. However, there are some variables with significant amounts of missing data that will make those variables unreliable in any meaningful analysis. I'm inclined to keep the variables with the NAs, but it will be unlikely I will use the ones with high amounts (i.e. LOC_OF_OCCUR_DESC, LOC_CLASSFCTN_DESC, and LOCATION_DESC). Similiarly, PERP_SEX, PERP_RACE, PERP_AGE_GROUP have approx 30% missing data, which also renders them unreliable, but we might find some use for them.
+
+### Additional Variable
+
+There is one more variable I would like to add. I want to include Month_Occur and Year. I hypothesize that warmer months will show an increase in shootings. Adding this variable will allow us to determine that. 
+
+``` {r add_month, echo=TRUE}
+shooting_data_reduced$MONTH_OCCUR <- format(shooting_data_reduced$OCCUR_DATE, "%b")
+shooting_data_reduced$YEAR <- format(shooting_data_reduced$OCCUR_DATE, "%Y")
+shooting_data_reduced$MONTH_OCCUR <- factor(
+shooting_data_reduced$MONTH_OCCUR,
+levels = month.abb, ordered = TRUE)
+shooting_data_reduced <- shooting_data_reduced %>%
+relocate(MONTH_OCCUR, .after = OCCUR_DATE) %>%
+relocate(YEAR, .after = MONTH_OCCUR)
+shooting_data_reduced
+
+```
+
+Success. We now have a Month and Year variable.
+
+### Questions
+
+Let us consider some questions we might want answers to:
+
+1. Do shootings tend to increase or decrease in certain months?
+2. Are there more shootings in certain time blocks/Boro combinations than others?
+
+
+### Analysis
+
+### 1. Do shootings tend to increase or decrease in certain months?
+
+My hypothesis for this question would be that, since this is a city in the Northeast part of the US that experiences all four seasons, there would be more shootings during warmer months than during colder ones. This would be due to the very nature of more people (both perps and victims) would be out and about during the summer, and not have the cold factor keeping them indoors. 
+
+We can assess this hypothesis with a simple table and look at the shootings per month:
+
+```{r shootings_by_month, echo=TRUE}
+
+shootings_by_month <- shooting_data_reduced %>%
+count(MONTH_OCCUR)
+shootings_by_month
+```
+
+Looking through each month in the table, you can certainly tell that there is a difference between some seasons, but it might be better with a histogram:
+
+```{r monthly_histogram, echo=TRUE}
+ggplot(shooting_data_reduced, aes(x= MONTH_OCCUR)) +
+  geom_bar(fill = "red") +
+  labs(title = "Total Shootings by Month", x = "Month", y = "Number of Shootings")
+```
+
+This histogram confirms the hypothesis that there are more shootings in warmer months.
+
+We can go further with this. Let's model this out to get a deeper understanding. 
+
+```{r month_model, echo=TRUE}
+
+# Create a monthly summary dataset
+monthly_shootings <- shooting_data_reduced %>%
+  count(YEAR, MONTH_OCCUR)
+
+# Ensure MONTH_OCCUR is a factor in Jan–Dec order
+monthly_shootings$MONTH_OCCUR <- factor(
+  monthly_shootings$MONTH_OCCUR,
+  levels = month.abb,
+  labels = month.abb,
+  ordered = FALSE
+)
+
+# Set dummy coding (default base is Jan)
+contrasts(monthly_shootings$MONTH_OCCUR) <- contr.treatment(12, base = 1)
+
+# Fit linear model
+month_model <- lm(n ~ MONTH_OCCUR, data = monthly_shootings)
+
+# Show model summary
+summary(month_model)
+
+```
+
+### What does this model analysis mean? 
+
+Intercept represents January (this can be altered) average shootings over the dataset. Every subsequent Month_Occur is the next month (i.e. 2=Feb, 3=Mar, etc).
+
+The estimate is how many shootings, on average, can you expect in that month in relation to January. 
+February is 20.3 less. March is almost flat. July is 87.8 more. 
+
+The P values are important. The Months with the asterisks to the right have P values less than .05. These months have significantly more shootings than January.
+
+### 2. Are there more shootings in certain time blocks/Boro combinations than others?
+
+I want to determine whether or not there are certain time block (based on the aforementioned timeframes) / Boro combinations that stand out as outliers compared to others. I hypothesize that there would likely be more shootings in Boros that have a higher rate of poverty, and during either the Night or Early Morning time blocks. 
+
+We can approach this question in the same way as question 1. Let's create a table. 
+
+```{r time_boro_counts, echo=TRUE}
+
+time_boro_counts <- shooting_data_reduced %>%
+     count(TIME_BLOCK, BORO)
+
+time_boro_counts
+```
+
+Based on this table, it's clear to see that the Night time block and Brooklyn carries the most shootings, but lets find out the subtotals.
+
+```{r time_boro_subtotals, echo=TRUE}
+
+#This shows number of shootings by time block
+shooting_data_reduced %>%
+     count(TIME_BLOCK) %>%
+     arrange(desc(n))
+
+#This shows number of shootings by boro
+shooting_data_reduced %>%
+     count(BORO) %>%
+     arrange(desc(n))
+```
+
+These tables are helpful, but a histogram might be better to show the difference.
+
+```{r time_boro_histogram, echo=TRUE}
+ggplot(shooting_data_reduced, aes(x = TIME_BLOCK, fill = TIME_BLOCK)) +
+  geom_bar() +
+  facet_wrap(~ BORO, scales = "free_x") +  
+  labs(title = "Number of Shootings by Time Block in Each Borough",
+    x = "Time Block", y = "Number of Shootings") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom")
+```
+
+These histograms show by boro, which time blocks have the most shootings occur.
+
+The hypothesis was that the most shootings would occur during dark hours, and likely in the boros with highest poverty. A cursory review of the website: https://www.census.gov/quickfacts/fact/table/newyorkcitynewyork,richmondcountynewyork,bronxcountynewyork,newyorkcountynewyork,kingscountynewyork,queenscountynewyork/PST045223
+shows Bronx and Brooklyn with the highest poverty levels, followed by Manahattan and Queens, and lastly Staten Island. This shows there is a correlation between poverty and shooting counts. 
+
+### Conclusion and Biases
+
+The data shown in this dataset is not much different than similar datasets I have seen in the past regarding crime and urban environments. Having lived in an urban environment my entire life, I suspected that my environment was not much different than NYC. In mine, I knew that the warm weather brought about much more seasonal  violent crime, particularly in financially disaffected areas. Hence, the hypotheses that I made. Turns out, NYC followed the same trend as my own very large home city. 
+
+With regard to avoiding bias, I stuck to questions that had complete data to back up an answer. I did my absolute best to leave out any analysis or hypothesis that was culturally or socially sensitive (i.e. racial analysis), particularly because I know my R expertise is minimal, and I would not be able to conduct further analysis that would need to stand up to increased scrutiny, due to the sensitivity of the topic, and I did not want to risk making unsupported or overly simplistic conclusions. 
